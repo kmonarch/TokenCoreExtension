@@ -1,0 +1,6 @@
+framework module Pods_TokenCoreTests {
+  umbrella header "Pods-TokenCoreTests-umbrella.h"
+
+  export *
+  module * { export * }
+}

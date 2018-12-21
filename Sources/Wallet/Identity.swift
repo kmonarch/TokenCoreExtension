@@ -1,0 +1,392 @@
+//
+//  Identity.swift
+//  token
+//
+//  Created by xyz on 2017/12/13.
+//  Copyright © 2017 ConsenLabs. All rights reserved.
+//
+
+import Foundation
+import CoreBitcoin
+
+public final class Identity {
+  private static var _currentIdentity: Identity?
+  static let storage = StorageManager.storage
+  static let currentIdentityKey = "currentIdentityKey"//userDefault中获取当前身份的key
+  static let identitysKey = "identitysKey"//userDefault中获取当前所有身份的key
+  public static var currentIdentity: Identity? {
+    set(newIdentity) {
+      _currentIdentity = newIdentity
+    }
+    get {
+      if _currentIdentity == nil {
+        //->userDefault ->currentIdentity->fileName -> load
+        let kIdentiter = Identity.currentIdentityIdentiter()
+        if kIdentiter != nil {
+          _currentIdentity = storage.tryLoadIdentity(identifier: kIdentiter!)
+        }
+      }
+      return _currentIdentity
+    }
+  }
+  public var keystore: IdentityKeystore
+  public var identifier: String {
+    //作为唯一标识
+    return keystore.identifier
+  }
+  public var wallets: [BasicWallet] {
+    return keystore.wallets
+  }
+
+  public static func tryLoad(identiter:String) -> Identity?{
+    return Identity.storage.tryLoadIdentity(identifier: identiter)
+  }
+
+  init(metadata: WalletMeta, mnemonic: String, password: String) throws {
+    keystore = try IdentityKeystore(metadata: metadata, mnemonic: mnemonic, password: password)
+    _ = try deriveWallets(for: [.eth, .btc], mnemonic: mnemonic, password: password)
+    _ = Identity.storage.flushIdentity(keystore)
+  }
+  ///可选钱包创建的初始化方法
+  init(metadata: WalletMeta, chainTypes: [ChainType], mnemonic: String, password: String) throws {
+    keystore = try IdentityKeystore(metadata: metadata, mnemonic: mnemonic, password: password)
+    //如果chainTypes.count == 0, 那么就会创建一个空身份
+    if chainTypes.count != 0 {
+      _ = try deriveWallets(for: chainTypes, mnemonic: mnemonic, password: password)
+    }
+    _ = Identity.storage.flushIdentity(keystore)
+  }
+
+  public init?(json: JSONObject) {
+    guard let keystore = try? IdentityKeystore(json: json) else {
+      return nil
+    }
+    self.keystore = keystore
+    self.keystore.wallets = Identity.storage.loadWalletByIDs(self.keystore.walletIds)
+  }
+  public func export(password: String) throws -> String {
+    guard keystore.verify(password: password) else {
+      throw PasswordError.incorrect
+    }
+    return try keystore.mnemonic(from: password)
+  }
+  public func delete(password: String) throws -> Bool {
+    guard keystore.verify(password: password) else {
+      throw PasswordError.incorrect
+    }
+    if Identity.storage.cleanStorage() {
+      Identity.currentIdentity = nil
+      return true
+    }
+    return false
+  }
+  public func deriveWallets(for chainTypes: [ChainType], password: String) throws -> [BasicWallet] {
+    let mnemonic = try export(password: password)
+    return try deriveWallets(for: chainTypes, mnemonic: mnemonic, password: password)
+  }
+}
+
+// MARK: Factory And Storage
+public extension Identity {
+
+  static func createIdentity(password: String, metadata: WalletMeta) throws -> (String, Identity) {
+    let mnemonic = MnemonicUtil.generateMnemonic()
+    let identity = try Identity(metadata: metadata, mnemonic: mnemonic, password: password)
+    Identity.setCurrentIdentityIdentiter(identiter: identity.keystore.identifier)
+    currentIdentity = identity
+    addIdentityInList(identiter: identity.keystore.identifier)
+    return (mnemonic, identity)
+  }
+  ///可选的创建钱包方法
+  static func createIdentity(password: String, metadata: WalletMeta, chainTypes: [ChainType]) throws -> (String, Identity) {
+    let mnemonic = MnemonicUtil.generateMnemonic()
+    let identity = try Identity(metadata: metadata, chainTypes: chainTypes, mnemonic: mnemonic, password: password)
+    Identity.setCurrentIdentityIdentiter(identiter: identity.keystore.identifier)
+    currentIdentity = identity
+    addIdentityInList(identiter: identity.keystore.identifier)
+    return (mnemonic, identity)
+  }
+
+  static func recoverIdentity(metadata: WalletMeta, mnemonic: String, password: String) throws -> Identity {
+    let identity = try Identity(metadata: metadata, mnemonic: mnemonic, password: password)
+    Identity.setCurrentIdentityIdentiter(identiter: identity.keystore.identifier)
+    currentIdentity = identity
+    addIdentityInList(identiter: identity.keystore.identifier)
+    return identity
+  }
+
+  ///可选的钱包恢复方法
+  static func recoverIdentity(metadata: WalletMeta, chainTypes: [ChainType], mnemonic: String, password: String) throws -> Identity {
+    let identity = try Identity(metadata: metadata, chainTypes: chainTypes, mnemonic: mnemonic, password: password)
+    Identity.setCurrentIdentityIdentiter(identiter: identity.keystore.identifier)
+    currentIdentity = identity
+    addIdentityInList(identiter: identity.keystore.identifier)
+    return identity
+  }
+}
+// MARK: Wallet
+extension Identity {
+ class func currentIdentityIdentiter() -> String? {
+    guard  let identiter: String = UserDefaults.standard.value(forKey: Identity.currentIdentityKey) as? String  else {
+      return nil
+    }
+    return identiter
+  }
+ public class func identitysList() -> [String]? {
+    guard  let identitys: [String] = UserDefaults.standard.stringArray(forKey: Identity.identitysKey)  else {
+      return nil
+    }
+    return identitys
+  }
+  class func addIdentityInList(identiter: String) {
+    let list: [String]? =  Identity.identitysList()
+    if  (list != nil) && list?.count != 0 {
+      var newList: [String] = list as! [String]
+      for kIdentiter in list! {
+        if kIdentiter == identiter {
+          return
+        }
+      }
+      newList += [identiter]
+      UserDefaults.standard.set(newList, forKey: Identity.identitysKey)
+    } else {
+      UserDefaults.standard.set([identiter], forKey: Identity.identitysKey)
+    }
+  }
+  class func removeIdentityInList(identiter: String) {
+      let list: [String]? =  Identity.identitysList()
+    guard list?.count != 0 else {
+      return
+    }
+
+    var newList: [String] = []
+    for kIdentiter in list! {
+      if kIdentiter != identiter {
+        newList += [kIdentiter]
+      }
+    }
+    UserDefaults.standard.set(newList, forKey: Identity.identitysKey)
+  }
+
+  //设置identiter,同时清空当前的currentyIdentity
+  class func setCurrentIdentityIdentiter(identiter: String) {
+    //对比当前的id
+    let kIdentiter: String? = Identity.currentIdentityIdentiter()
+    if (kIdentiter == nil) || kIdentiter != identiter {
+      UserDefaults.standard.set(identiter, forKey: Identity.currentIdentityKey)
+      Identity.currentIdentity = nil
+    }
+  }
+
+  func append(_ newKeystore: Keystore) throws -> BasicWallet {
+    let wallet = BasicWallet(newKeystore)
+
+    keystore.wallets.append(wallet)
+    keystore.walletIds.append(wallet.walletID)
+    if Identity.storage.flushWallet(wallet.keystore) && Identity.storage.flushIdentity(keystore) {
+      return wallet
+    }
+
+    throw GenericError.importFailed
+  }
+
+  func removeWallet(_ wallet: BasicWallet) -> Bool {
+    if let index = keystore.walletIds.index(where: { return $0 == wallet.walletID }) {
+      keystore.wallets.remove(at: index)
+      keystore.walletIds.remove(at: index)
+      return Identity.storage.flushIdentity(keystore)
+    }
+    return false
+  }
+
+  func importFromMnemonic(_ mnemonic: String, metadata: WalletMeta, encryptBy password: String, at path: String) throws -> BasicWallet {
+    if path.isEmpty {
+      throw MnemonicError.pathInvalid
+    }
+
+    let keystore: Keystore
+
+    switch metadata.chain! {
+    case .btc:
+      keystore = try BTCMnemonicKeystore(password: password, mnemonic: mnemonic, path: path, metadata: metadata)
+    case .eth:
+      keystore = try ETHMnemonicKeystore(password: password, mnemonic: mnemonic, path: path, metadata: metadata)
+    case .eos:
+      throw GenericError.operationUnsupported
+    }
+
+    return try append(keystore)
+  }
+
+  //需要在当前identity下操作
+  func importEOS(
+    from mnemonic: String,
+    accountName: String,
+    permissions: [EOS.PermissionObject],
+    metadata: WalletMeta,
+    encryptBy password: String,
+    at path: String
+    ) throws -> BasicWallet {
+    if path.isEmpty {
+      throw MnemonicError.pathInvalid
+    }
+
+    if metadata.chain != .eos {
+      throw GenericError.operationUnsupported
+    }
+
+    let keystore = try EOSKeystore(accountName: accountName, password: password, mnemonic: mnemonic, path: path, permissions: permissions, metadata: metadata)
+    return try append(keystore)
+  }
+
+  //新建身份导入，此方法不满足
+  func importEOS(
+    from privateKeys: [String],
+    accountName: String,
+    permissions: [EOS.PermissionObject],
+    encryptedBy password: String,
+    metadata: WalletMeta
+    ) throws -> BasicWallet {
+    if metadata.chain != .eos {
+      throw GenericError.operationUnsupported
+    }
+
+    let keystore = try EOSKeystore(accountName: accountName, password: password, privateKeys: privateKeys, permissions: permissions, metadata: metadata)
+    return try append(keystore)
+  }
+
+  /**
+   Import ETH keystore json to generate wallet
+   
+   - parameter keystore: JSON text
+   - parameter password: Password of keystore
+   - parameter metadata: Wallet metadata
+   */
+  func importFromKeystore(_ keystore: JSONObject, encryptedBy password: String, metadata: WalletMeta) throws -> BasicWallet {
+    var keystore = try ETHKeystore(json: keystore)
+    keystore.meta = metadata
+    guard keystore.verify(password: password) else {
+      throw KeystoreError.macUnmatch
+    }
+
+    let privateKey = keystore.decryptPrivateKey(password)
+    do {
+      _ = try PrivateKeyValidator(privateKey, on: .eth).validate()
+    } catch let err as AppError {
+      if err.message == PrivateKeyError.invalid.rawValue {
+        throw KeystoreError.containsInvalidPrivateKey
+      } else {
+        throw err
+      }
+    }
+    guard ETHKey(privateKey: keystore.decryptPrivateKey(password)).address == keystore.address else {
+      throw KeystoreError.privateKeyAddressUnmatch
+    }
+
+    return try append(keystore)
+  }
+
+  /**
+   Import private key to generate wallet
+   */
+  func importFromPrivateKey(_ privateKey: String, encryptedBy password: String, metadata: WalletMeta, accountName: String? = nil) throws -> BasicWallet {
+    let keystore: Keystore
+    switch metadata.chain! {
+    case .btc:
+      keystore = try BTCKeystore(password: password, wif: privateKey, metadata: metadata)
+    case .eth:
+      keystore = try ETHKeystore(password: password, privateKey: privateKey, metadata: metadata)
+    case .eos:
+      guard let accountName = accountName, !accountName.isEmpty else {
+        throw GenericError.paramError
+      }
+      keystore = try EOSLegacyKeystore(password: password, wif: privateKey, metadata: metadata, accountName: accountName)
+    }
+    return try append(keystore)
+  }
+
+  func findWalletByPrivateKey(_ privateKey: String, on chainType: ChainType, network: Network? = nil, segWit: SegWit = .none) throws -> BasicWallet? {
+    if chainType == .eth {
+      let address = ETHKey(privateKey: privateKey).address
+      return findWalletByAddress(address, on: chainType)
+    } else {
+      guard let key = BTCKey(wif: privateKey) else {
+        throw PrivateKeyError.invalid
+      }
+
+      let address = key.address(on: network, segWit: segWit).string
+      return findWalletByAddress(address, on: chainType)
+    }
+  }
+
+  // ETH: generate address from mnemonic and path
+  // BTC: generate $PATH/0/0 address from mnemonic and path
+  func findWalletByMnemonic(_ mnemonic: String, on chainType: ChainType, path: String, network: Network? = nil, segWit: SegWit = .none) throws -> BasicWallet? {
+    if path.isEmpty {
+      throw MnemonicError.pathInvalid
+    }
+
+    if chainType == .eth {
+      let addr = ETHKey.mnemonicToAddress(mnemonic, path: path)
+      return findWalletByAddress(addr, on: chainType)
+    } else if chainType == .btc {
+      guard let btcMnemonic = BTCMnemonic(words: mnemonic.split(separator: " "), password: "", wordListType: .english),
+        let seedData = btcMnemonic.seed else {
+          throw MnemonicError.wordInvalid
+      }
+
+      let isMainnet = network?.isMainnet ?? true
+      guard let masterKeychain = BTCKeychain(seed: seedData, network: isMainnet ? BTCNetwork.mainnet() : BTCNetwork.testnet()),
+        let account = masterKeychain.derivedKeychain(withPath: path),
+        let key = account.externalKey(at: 0) else {
+          throw GenericError.unknownError
+      }
+      return findWalletByAddress(key.address(on: network, segWit: segWit).string, on: chainType)
+    }
+
+    throw GenericError.unsupportedChain
+  }
+
+  func findWalletByKeystore(_ keystore: [String: Any], on chainType: ChainType, password: String) throws -> BasicWallet? {
+    guard chainType == .eth else {
+      throw GenericError.unsupportedChain
+    }
+
+    let ks = try ETHKeystore(json: keystore)
+    guard ks.verify(password: password) else {
+      throw KeystoreError.macUnmatch
+    }
+    return findWalletByAddress(ks.address, on: .eth)
+  }
+
+  func findWalletByWalletID(_ walletID: String) -> BasicWallet? {
+    return keystore.wallets.first(where: { return $0.walletID == walletID })
+  }
+
+  func findWalletByAddress(_ address: String, on chainType: ChainType) -> BasicWallet? {
+    return keystore.wallets.first { (wallet) -> Bool in
+      return wallet.address == address && wallet.imTokenMeta.chain == chainType
+    }
+  }
+
+  func deriveWallets(for chainTypes: [ChainType], mnemonic: String, password: String) throws -> [BasicWallet] {
+    return try chainTypes.map { chainType in
+      var meta = WalletMeta(chain: chainType, source: keystore.meta.source)
+      meta.passwordHint = keystore.meta.passwordHint
+
+      switch chainType {
+      case .eth:
+        meta.name = "ETH"
+        return try importFromMnemonic(mnemonic, metadata: meta, encryptBy: password, at: BIP44.eth)
+      case .btc:
+        meta.name = "BTC"
+        meta.network = keystore.meta.network
+        meta.segWit = keystore.meta.segWit
+        return try importFromMnemonic(mnemonic, metadata: meta, encryptBy: password, at: BIP44.path(for: meta.network, segWit: meta.segWit))
+      case .eos:
+        meta.name = "EOS"
+        return try importEOS(from: mnemonic, accountName: "", permissions: [], metadata: meta, encryptBy: password, at: BIP44.eosLedger)
+      }
+    }
+  }
+}
