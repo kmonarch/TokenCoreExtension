@@ -169,7 +169,6 @@
 		1A6928D22069D31E00404E68 /* BTCNetwork.h in Headers */ = {isa = PBXBuildFile; fileRef = 1A69282A2069D31D00404E68 /* BTCNetwork.h */; };
 		1A6928D32069D31E00404E68 /* BTCScriptMachine.h in Headers */ = {isa = PBXBuildFile; fileRef = 1A69282B2069D31D00404E68 /* BTCScriptMachine.h */; };
 		1A6928D52069D31E00404E68 /* BTCTransactionInput.h in Headers */ = {isa = PBXBuildFile; fileRef = 1A69282D2069D31D00404E68 /* BTCTransactionInput.h */; };
-		1A6928D62069D31E00404E68 /* CoreBitcoin.h in Headers */ = {isa = PBXBuildFile; fileRef = 1A69282E2069D31D00404E68 /* CoreBitcoin.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		1A6928D72069D31E00404E68 /* BTCAssetAddress.h in Headers */ = {isa = PBXBuildFile; fileRef = 1A69282F2069D31D00404E68 /* BTCAssetAddress.h */; };
 		1A6928D82069D31E00404E68 /* BTCBitcoinURL.h in Headers */ = {isa = PBXBuildFile; fileRef = 1A6928302069D31D00404E68 /* BTCBitcoinURL.h */; };
 		1A6928D92069D31E00404E68 /* BTCErrors.m in Sources */ = {isa = PBXBuildFile; fileRef = 1A6928312069D31D00404E68 /* BTCErrors.m */; };
@@ -1231,7 +1230,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				1A6928E02069D31E00404E68 /* sha256.h in Headers */,
-				1A6928D62069D31E00404E68 /* CoreBitcoin.h in Headers */,
 				1A6928962069D31E00404E68 /* NSData+BTCData.h in Headers */,
 				1A6928672069D31E00404E68 /* BTCPaymentMethod.h in Headers */,
 				1A6928512069D31E00404E68 /* BTCCurvePoint.h in Headers */,
