@@ -10,4 +10,6 @@
 
 FOUNDATION_EXPORT double TokenCoreVersionNumber;
 
+#import "CoreBitcoin.h"
+
 FOUNDATION_EXPORT const unsigned char TokenCoreVersionString[];
